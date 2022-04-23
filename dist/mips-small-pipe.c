@@ -71,11 +71,29 @@ void run(Pstate state) {
     new.cycles++;
 
     /* --------------------- IF stage --------------------- */
-
+    new.IFID.instr = state->instrMem[new.pc];
+    if ((opcode(state->EXMEM.instr) == BEQZ_OP) & (state->IDEX.pcPlus1 == new.pc))
+      {
+        new.IFID.pcPlus1, new.pc = state->EXMEM.aluResult;
+      } else {
+        new.IFID.pcPlus1, new.pc += 4;
+      }
+    
     /* --------------------- ID stage --------------------- */
+    new.IDEX.readRegA = state->reg[field_r2(state->IFID.instr)];
+    new.IDEX.readRegB = state->reg[field_r3(state->IFID.instr)];
+    new.IDEX.pcPlus1 = state->IFID.pcPlus1;
+    new.IDEX.instr = state->IFID.instr;
 
+    int instrOp = opcode(state->IFID.instr);
+    if (instrOp == REG_REG_OP) {
+      new.IDEX.offset = state->reg[field_r1(state->IFID.instr)];
+    } else {
+      new.IDEX.offset = offset(field_imm(state->IFID.instr));
+    }
+    
     /* --------------------- EX stage --------------------- */
-
+    
     /* --------------------- MEM stage --------------------- */
 
     /* --------------------- WB stage --------------------- */
