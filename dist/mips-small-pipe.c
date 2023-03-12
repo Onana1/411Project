@@ -58,7 +58,9 @@ int main(int argc, char *argv[]) {
 /************************************************************/
 void run(Pstate state) {
   state_t new;
+  int instrCode, funcOperation, instrMemCode, instrWBCode, exVarA, exVarB;
   memset(&new, 0, sizeof(state_t));
+  
 
   while (1) {
 
@@ -69,18 +71,256 @@ void run(Pstate state) {
     memcpy(&new, state, sizeof(state_t));
 
     new.cycles++;
+    /*if (new.cycles > 15) {
+       exit(0);
+    }*/
 
     /* --------------------- IF stage --------------------- */
+    new.IFID.instr = state->instrMem[state->pc >> 2];
 
+    if ((opcode(state->instrMem[state->pc >> 2]) == BEQZ_OP) && offset(field_imm(state->instrMem[state->pc >> 2])) < 0) {
+      new.IFID.pcPlus1 = state->pc + 4;
+      new.pc = state->pc + 4 + offset(field_imm(state->instrMem[state->pc >> 2]));
+      new.IFID.instr = state->instrMem[state->pc >> 2];
+    }
+    /*if ((opcode(state->EXMEM.instr) == BEQZ_OP) && (offset(new.IFID.instr) < 0))
+    if ((opcode(state->EXMEM.instr) == BEQZ_OP) && (offset(new.IFID.instr) < 0)) {
+    
+    }
+     if ((opcode(state->EXMEM.instr) == BEQZ_OP)){ */
+    /*if ((opcode(new.IFID.instr) == BEQZ_OP) && (offset(new.IFID.instr) < 0)) {
+        new.IFID.pcPlus1 = new.pc = state->pc + offset(new.IFID.instr);
+    }*/ else {
+      new.IFID.pcPlus1 = new.pc += 4;
+    }
+    
     /* --------------------- ID stage --------------------- */
+    new.IDEX.readRegA = state->reg[field_r1(state->IFID.instr)];
+    new.IDEX.readRegB = state->reg[field_r2(state->IFID.instr)];
+    new.IDEX.pcPlus1 = state->IFID.pcPlus1;
+    new.IDEX.instr = state->IFID.instr;
+    new.IDEX.offset = offset(field_imm(state->IFID.instr));
 
+    /*stall if load precedes and uses source*/
+   if (opcode(state->IDEX.instr) == LW_OP && field_r2(state->IDEX.instr) != 0) {
+     if (field_r2(state->IDEX.instr) == field_r1(state->IFID.instr)) {
+        new.IDEX.readRegA = state->reg[field_r1(NOPINSTRUCTION)];
+        new.IDEX.readRegB = state->reg[field_r2(NOPINSTRUCTION)];
+        new.IDEX.pcPlus1 = 0;
+        new.IDEX.instr = NOPINSTRUCTION;
+        new.IDEX.offset = offset(field_imm(NOPINSTRUCTION));
+        new.IFID = state->IFID;
+        new.pc = state->pc;
+     } else if (opcode(state->IFID.instr) == REG_REG_OP && (field_r2(state->IDEX.instr) == field_r2(state->IFID.instr))) {
+        new.IDEX.readRegA = state->reg[field_r1(NOPINSTRUCTION)];
+        new.IDEX.readRegB = state->reg[field_r2(NOPINSTRUCTION)];
+        new.IDEX.pcPlus1 = 0;
+        new.IDEX.instr = NOPINSTRUCTION;
+        new.IDEX.offset = offset(field_imm(NOPINSTRUCTION));
+        new.IFID = state->IFID;
+        new.pc = state->pc;
+     }
+   }
+
+    
+    /*instrOp = opcode(state->IFID.instr);
+    if (instrOp == REG_REG_OP) {
+      new.IDEX.offset = state->reg[field_r1(state->IFID.instr)];
+    } else {
+      new.IDEX.offset = offset(field_imm(state->IFID.instr));
+    }*/
+    
     /* --------------------- EX stage --------------------- */
+    instrCode = opcode(state->IDEX.instr);
+    /*exVarA = state->reg[state->IDEX.readRegA];
+    exVarB = state->reg[state->IDEX.readRegB];*/
+    /*printf("\t varAreg: %d\n", state->reg[field_r1(state->IFID.instr)]);*/
+    exVarA = state->IDEX.readRegA;
+    exVarB = state->IDEX.readRegB;
+
+    /*forwarding check start*/
+    if (opcode(state->WBEND.instr) == REG_REG_OP) {
+      if (field_r3(state->WBEND.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->WBEND.writeData;
+      }
+
+      if (field_r3(state->WBEND.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->WBEND.writeData;
+      }
+    }
+
+    if (opcode(state->MEMWB.instr) == REG_REG_OP) {
+      if (field_r3(state->MEMWB.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->MEMWB.writeData;
+      }
+
+      if (field_r3(state->MEMWB.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->MEMWB.writeData;
+      }
+    }
+
+    if (opcode(state->EXMEM.instr) == REG_REG_OP) {
+      if (field_r3(state->EXMEM.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->EXMEM.aluResult;
+      }
+
+      if (field_r3(state->EXMEM.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->EXMEM.aluResult;
+      }
+
+    }
+
+    if (((opcode(state->WBEND.instr) == ADDI_OP) || (opcode(state->WBEND.instr) == LW_OP)) && (field_r2(state->WBEND.instr) != 0)){
+      /*printf("\t wbend %d\n", field_r2(state->WBEND.instr));*/
+      if (field_r2(state->WBEND.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->WBEND.writeData;
+      }
+
+      if (field_r2(state->WBEND.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->WBEND.writeData;
+      }
+    }
+    
+    if (((opcode(state->MEMWB.instr) == ADDI_OP) || (opcode(state->MEMWB.instr) == LW_OP)) && (field_r2(state->MEMWB.instr) != 0)){
+      /*printf("\t memwb %d\n", field_r2(state->MEMWB.instr));*/
+      if (field_r2(state->MEMWB.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->MEMWB.writeData;
+      }
+
+      if (field_r2(state->MEMWB.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->MEMWB.writeData;
+      }
+    }
+
+    if (((opcode(state->EXMEM.instr) == ADDI_OP) || (opcode(state->EXMEM.instr) == LW_OP)) && (field_r2(state->EXMEM.instr) != 0)){
+      if (field_r2(state->EXMEM.instr) == field_r1(state->IDEX.instr)) {
+        exVarA = state->EXMEM.aluResult;
+      }
+
+      if (field_r2(state->EXMEM.instr) == field_r2(state->IDEX.instr)) {
+        exVarB = state->EXMEM.aluResult;
+      }
+    }
+
+    /*forwarding check end*/
+
+    if (instrCode == REG_REG_OP){
+      new.EXMEM.instr = state->IDEX.instr;
+      funcOperation = func(state->IDEX.instr);
+      new.EXMEM.readRegB = exVarB;
+
+      if (funcOperation == ADD_FUNC) {
+        new.EXMEM.aluResult = exVarA + exVarB;
+      } else if (funcOperation == SUB_FUNC) {
+        new.EXMEM.aluResult = exVarA - exVarB;
+      } else if (funcOperation == SLL_FUNC) {
+        new.EXMEM.aluResult = exVarA << exVarB;
+      } else if (funcOperation == SRL_FUNC) {
+        new.EXMEM.aluResult = ((unsigned int) exVarA) >> exVarB;
+      } else if (funcOperation == AND_FUNC) {
+        new.EXMEM.aluResult = exVarA & exVarB;
+      } else if (funcOperation == OR_FUNC) {
+        new.EXMEM.aluResult = exVarA | exVarB;
+      }
+
+    if (field_r3(state->IDEX.instr) == 0) {
+      new.EXMEM.aluResult = 0;
+    }
+    } else if (instrCode == ADDI_OP) {
+      new.EXMEM.instr = state->IDEX.instr;
+      new.EXMEM.aluResult = exVarA + state->IDEX.offset;
+      new.EXMEM.readRegB = state->IDEX.readRegB;
+      if (field_r2(state->IDEX.instr) == 0) {
+        new.EXMEM.aluResult = 0;
+      }
+    } else if (instrCode == LW_OP) {
+      new.EXMEM.instr = state->IDEX.instr;
+      new.EXMEM.aluResult = (exVarA + state->IDEX.offset);
+      new.EXMEM.readRegB = state->IDEX.readRegB;
+      
+    } else if (instrCode == SW_OP) {
+      new.EXMEM.instr = state->IDEX.instr;
+      new.EXMEM.aluResult = (exVarA + state->IDEX.offset);
+      new.EXMEM.readRegB = exVarB;
+    } else if (instrCode == BEQZ_OP) {
+      new.EXMEM.instr = state->IDEX.instr;
+      new.EXMEM.aluResult = state->IDEX.pcPlus1 + state->IDEX.offset;
+      /*new.pc = state->IDEX.pcPlus1 + state->IDEX.offset;*/
+      if (exVarA == 0) {
+        /* should have predicted taken */
+        /* check if prediction was correct */
+        if (state->IDEX.offset >= 0) {
+          new.pc = state->IDEX.pcPlus1 + state->IDEX.offset;
+
+          new.IFID.instr = NOPINSTRUCTION;
+          new.IFID.pcPlus1 = 0;
+
+          new.IDEX.instr = NOPINSTRUCTION;
+          new.IDEX.pcPlus1 = 0;
+          new.IDEX.readRegA = 0;
+          new.IDEX.readRegB = 0;
+          new.IDEX.offset = offset(field_imm(NOPINSTRUCTION));
+        }
+      } else {
+          if (state->IDEX.offset < 0) {
+            new.pc = state->IDEX.pcPlus1 + state->IDEX.offset + 4;
+
+            new.IFID.instr = NOPINSTRUCTION;
+            new.IFID.pcPlus1 = 0;
+
+            new.IDEX.instr = NOPINSTRUCTION;
+            new.IDEX.pcPlus1 = 0;
+            new.IDEX.readRegA = 0;
+            new.IDEX.readRegB = 0;
+            new.IDEX.offset = offset(field_imm(NOPINSTRUCTION));
+          }
+      }
+      new.EXMEM.readRegB = exVarB;
+
+    } else if (instrCode == HALT_OP || instrCode == NOPINSTRUCTION) {
+      new.EXMEM.instr = state->IDEX.instr;
+      new.EXMEM.aluResult = exVarA + state->IDEX.offset;
+      new.EXMEM.readRegB = state->IDEX.readRegB;
+    } else {
+      printf("error: illegal opcode %x\n", instrCode);
+            exit(1);
+    }
 
     /* --------------------- MEM stage --------------------- */
-
+    instrMemCode = opcode(state->EXMEM.instr);
+    new.MEMWB.instr = state->EXMEM.instr;
+    
+    if ((instrMemCode == REG_REG_OP) || (instrMemCode == ADDI_OP)){
+      new.MEMWB.writeData = state->EXMEM.aluResult;
+    } else if (instrMemCode == LW_OP) {
+      new.MEMWB.writeData = new.dataMem[state->EXMEM.aluResult >> 2];
+      if (field_r2(state->EXMEM.instr) == 0) {
+        new.MEMWB.writeData = 0;
+      }
+      /*new.dataMem[state->EXMEM.aluResult] = state->EXMEM.readRegB;*/
+    } else if (instrMemCode == SW_OP) {
+      new.MEMWB.writeData = state->EXMEM.readRegB;
+      new.dataMem[state->EXMEM.aluResult >> 2] = state->EXMEM.readRegB;
+    } else if (instrMemCode == HALT_OP || instrMemCode == BEQZ_OP) {
+      new.MEMWB.writeData = state->EXMEM.aluResult;
+    }
+    
+    
     /* --------------------- WB stage --------------------- */
+    instrWBCode = opcode(state->MEMWB.instr);
+    if (instrWBCode == REG_REG_OP){
+      new.reg[field_r3(state->MEMWB.instr)] = state->MEMWB.writeData;
+    } else if (instrWBCode == ADDI_OP || instrWBCode == LW_OP) {
+      new.reg[field_r2(state->MEMWB.instr)] = state->MEMWB.writeData;
+    } else if (instrWBCode == HALT_OP) {
+      printf("machine halted\n");
+      printf("total of %d cycles executed\n", state->cycles);
+      exit(0);
+    }
 
     /* --------------------- end stage --------------------- */
+    new.WBEND.instr = state->MEMWB.instr;
+    new.WBEND.writeData = state->MEMWB.writeData;
 
     /* transfer new state into current state */
     memcpy(state, &new, sizeof(state_t));
